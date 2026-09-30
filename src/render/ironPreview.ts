@@ -1,3 +1,4 @@
+import type { Point } from '../domain/board'
 import type { Design } from '../domain/design'
 
 export interface PreviewOptions {
@@ -51,6 +52,70 @@ export function previewDimensions(
     width: (bounds.maxX - bounds.minX + 1) * options.pixelPerBead + options.padding * 2,
     height: (bounds.maxY - bounds.minY + 1) * options.pixelPerBead + options.padding * 2,
   }
+}
+
+/** How far melted plastic spills past its own cell, as a fraction of the cell size. */
+const MELT_SPREAD = 0.13
+const MELT_EDGE_MIN = 1.4
+const MELT_EDGE_RANGE = 0.4
+// Corners spill further than edges: four cells meeting at a grid vertex stay fused
+// only while each corner curve bulges past that vertex.
+const MELT_CORNER_MIN = 1.5
+const MELT_CORNER_RANGE = 0.5
+
+/**
+ * Deterministic pseudo-random value in [0, 1) for one cell and channel, so the
+ * same design always melts the same way — preview and exported PNG must match.
+ */
+function meltNoise(x: number, y: number, channel: number): number {
+  let h = Math.imul(x, 0x1f123bb5) ^ Math.imul(y, 0x27d4eb2f) ^ Math.imul(channel, 0x165667b1)
+  h = Math.imul(h ^ (h >>> 15), 0x2545f491)
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296
+}
+
+/**
+ * Outline of one ironed bead: eight points in path order — four on-curve edge
+ * midpoints bulging outwards, alternating with four off-curve corner controls.
+ * Heat leaves the square cell unevenly, so every point sits outside it and
+ * neighbours overlap instead of meeting at a straight seam.
+ */
+export function meltedBeadOutline(
+  x: number,
+  y: number,
+  size: number,
+  seedX: number,
+  seedY: number,
+): Point[] {
+  const spread = size * MELT_SPREAD
+  const edge = (channel: number): number =>
+    spread * (MELT_EDGE_MIN + MELT_EDGE_RANGE * meltNoise(seedX, seedY, channel))
+  const corner = (channel: number): number =>
+    spread * (MELT_CORNER_MIN + MELT_CORNER_RANGE * meltNoise(seedX, seedY, channel))
+  const midX = x + size / 2
+  const midY = y + size / 2
+  const right = x + size
+  const bottom = y + size
+  return [
+    { x: midX, y: y - edge(0) },
+    { x: right + corner(1), y: y - corner(2) },
+    { x: right + edge(3), y: midY },
+    { x: right + corner(4), y: bottom + corner(5) },
+    { x: midX, y: bottom + edge(6) },
+    { x: x - corner(7), y: bottom + corner(8) },
+    { x: x - edge(9), y: midY },
+    { x: x - corner(10), y: y - corner(11) },
+  ]
+}
+
+function traceMeltedBead(ctx: CanvasRenderingContext2D, outline: Point[]): void {
+  ctx.beginPath()
+  ctx.moveTo(outline[0].x, outline[0].y)
+  for (let index = 1; index < outline.length; index += 2) {
+    const control = outline[index]
+    const end = outline[(index + 1) % outline.length]
+    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y)
+  }
+  ctx.closePath()
 }
 
 export type CornerFill =
@@ -110,19 +175,8 @@ export function renderIronedPreview(
   }
 
   const size = options.pixelPerBead
-  // Ironed plastic spreads, so exposed corners round well past a square's radius.
-  const radius = size * 0.34
   const fill = size * 0.3
   const occupied = new Set(design.beads.map((bead) => `${bead.x},${bead.y}`))
-  // Back shared edges before antialiased cell fills, including downscaled PNGs.
-  const overlap = size * 0.04
-  for (const bead of design.beads) {
-    const x = options.padding + (bead.x - bounds.minX) * size
-    const y = options.padding + (bead.y - bounds.minY) * size
-    ctx.fillStyle = bead.color
-    if (occupied.has(`${bead.x + 1},${bead.y}`)) ctx.fillRect(x + size - overlap, y, overlap * 2, size)
-    if (occupied.has(`${bead.x},${bead.y + 1}`)) ctx.fillRect(x, y + size - overlap, size, overlap * 2)
-  }
   // Melted filler first, so the bead bodies and their shading stay on top.
   for (const corner of cornerFills(design)) {
     const px = options.padding + (corner.x - bounds.minX) * size
@@ -152,14 +206,10 @@ export function renderIronedPreview(
     const bottom = occupied.has(`${bead.x},${bead.y + 1}`)
     const left = occupied.has(`${bead.x - 1},${bead.y}`)
 
-    // Only exposed corners are rounded; shared edges meet without a gap.
-    ctx.beginPath()
-    ctx.roundRect(x, y, size, size, [
-      top || left ? 0 : radius,
-      top || right ? 0 : radius,
-      bottom || right ? 0 : radius,
-      bottom || left ? 0 : radius,
-    ])
+    // Ironed beads melt past their cell and overlap their neighbours, so shared
+    // edges fuse instead of meeting at a straight cut.
+    const outline = meltedBeadOutline(x, y, size, bead.x, bead.y)
+    traceMeltedBead(ctx, outline)
     ctx.fillStyle = bead.color
     ctx.fill()
     ctx.fillStyle = sheen
@@ -167,12 +217,14 @@ export function renderIronedPreview(
 
     ctx.save()
     ctx.clip()
+    // Rim light hugs the melted edge, which sits outside the cell on exposed sides.
+    const rim = size * 0.045
     ctx.fillStyle = 'rgba(255, 255, 255, 0.18)'
-    if (!top) ctx.fillRect(x, y, size, size * 0.045)
-    if (!left) ctx.fillRect(x, y, size * 0.045, size)
+    if (!top) ctx.fillRect(x, outline[0].y, size, rim)
+    if (!left) ctx.fillRect(outline[6].x, y, rim, size)
     ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'
-    if (!bottom) ctx.fillRect(x, y + size * 0.955, size, size * 0.045)
-    if (!right) ctx.fillRect(x + size * 0.955, y, size * 0.045, size)
+    if (!bottom) ctx.fillRect(x, outline[4].y - rim, size, rim)
+    if (!right) ctx.fillRect(outline[2].x - rim, y, rim, size)
     ctx.restore()
 
     // A small recessed opening remains after ironing, unlike the editor's peg hole.
