@@ -53,6 +53,47 @@ export function previewDimensions(
   }
 }
 
+export type CornerFill =
+  /** Wedge of plastic melted into a reflex notch; (dx, dy) points into the notch. */
+  | { kind: 'fillet'; x: number; y: number; dx: -1 | 1; dy: -1 | 1; color: string }
+  /** Short neck fusing two beads that only touch at a corner. */
+  | { kind: 'bridge'; x: number; y: number; color: string }
+
+/**
+ * Grid vertices where ironing adds material: the outer contour is the union of
+ * the bead squares, so a 3-cell vertex is a sharp reflex notch and a diagonal
+ * pair of cells meets at a single point instead of fusing.
+ */
+export function cornerFills(design: Design): CornerFill[] {
+  const bounds = boundsFor(design)
+  if (!bounds) return []
+  const colors = new Map(design.beads.map((bead) => [`${bead.x},${bead.y}`, bead.color]))
+  const at = (x: number, y: number): string | undefined => colors.get(`${x},${y}`)
+  const fills: CornerFill[] = []
+  for (let gy = bounds.minY; gy <= bounds.maxY + 1; gy += 1) {
+    for (let gx = bounds.minX; gx <= bounds.maxX + 1; gx += 1) {
+      const nw = at(gx - 1, gy - 1)
+      const ne = at(gx, gy - 1)
+      const sw = at(gx - 1, gy)
+      const se = at(gx, gy)
+      const occupied = (nw ? 1 : 0) + (ne ? 1 : 0) + (sw ? 1 : 0) + (se ? 1 : 0)
+      if (occupied === 3) {
+        // The missing cell is the notch; colour the wedge with the corner cell
+        // across the vertex, which is the one the melted plastic flows from.
+        if (!ne && sw) fills.push({ kind: 'fillet', x: gx, y: gy, dx: 1, dy: -1, color: sw })
+        else if (!nw && se) fills.push({ kind: 'fillet', x: gx, y: gy, dx: -1, dy: -1, color: se })
+        else if (!se && nw) fills.push({ kind: 'fillet', x: gx, y: gy, dx: 1, dy: 1, color: nw })
+        else if (ne) fills.push({ kind: 'fillet', x: gx, y: gy, dx: -1, dy: 1, color: ne })
+        continue
+      }
+      if (occupied !== 2) continue
+      if (nw && se) fills.push({ kind: 'bridge', x: gx, y: gy, color: nw })
+      else if (ne && sw) fills.push({ kind: 'bridge', x: gx, y: gy, color: ne })
+    }
+  }
+  return fills
+}
+
 export function renderIronedPreview(
   ctx: CanvasRenderingContext2D,
   design: Design,
@@ -69,7 +110,9 @@ export function renderIronedPreview(
   }
 
   const size = options.pixelPerBead
-  const radius = size * 0.24
+  // Ironed plastic spreads, so exposed corners round well past a square's radius.
+  const radius = size * 0.34
+  const fill = size * 0.3
   const occupied = new Set(design.beads.map((bead) => `${bead.x},${bead.y}`))
   // Back shared edges before antialiased cell fills, including downscaled PNGs.
   const overlap = size * 0.04
@@ -79,6 +122,23 @@ export function renderIronedPreview(
     ctx.fillStyle = bead.color
     if (occupied.has(`${bead.x + 1},${bead.y}`)) ctx.fillRect(x + size - overlap, y, overlap * 2, size)
     if (occupied.has(`${bead.x},${bead.y + 1}`)) ctx.fillRect(x, y + size - overlap, size, overlap * 2)
+  }
+  // Melted filler first, so the bead bodies and their shading stay on top.
+  for (const corner of cornerFills(design)) {
+    const px = options.padding + (corner.x - bounds.minX) * size
+    const py = options.padding + (corner.y - bounds.minY) * size
+    ctx.fillStyle = corner.color
+    ctx.beginPath()
+    if (corner.kind === 'bridge') {
+      ctx.arc(px, py, fill, 0, Math.PI * 2)
+    } else {
+      // Rounded wedge between the two notch edges, tangent to both.
+      ctx.moveTo(px + corner.dx * fill, py)
+      ctx.arcTo(px, py, px, py + corner.dy * fill, fill)
+      ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    ctx.fill()
   }
   const sheen = ctx.createLinearGradient(0, options.padding, 0, dimensions.height - options.padding)
   sheen.addColorStop(0, 'rgba(255, 255, 255, 0.12)')

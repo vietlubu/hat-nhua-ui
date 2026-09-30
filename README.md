@@ -25,7 +25,7 @@ Triển khai thư mục `dist/` ở gốc một static host có HTTPS. Localhost
 - Hai ngón tay để thu/phóng và di chuyển; trên máy tính dùng wheel hoặc các nút `+`, `−`. Nút đặt lại khung đưa `(0, 0)` về giữa ở zoom ban đầu.
 - Bảng màu bắt đầu với 16 màu. Mỗi ô màu hiển thị số hạt đang dùng màu đó trong thiết kế hiện tại; chữ dùng màu đen hoặc trắng theo độ tương phản (WCAG) với ô màu. Chọn **Màu mới → Thêm màu** để thêm màu tùy ý; chọn một màu rồi **Xóa màu đang chọn** để bỏ khỏi bảng. Màu trùng không được thêm lần nữa. Bảng màu tự lưu trên trình duyệt; xóa màu không đổi các hạt đã vẽ. Có thể xóa hết màu rồi thêm lại; Bút tạm tắt khi chưa có màu.
 - Khung không có kích thước cố định; mỗi tọa độ nguyên, kể cả âm, tương ứng một hạt.
-- Preview cập nhật cùng mẫu: hạt kề cạnh dính liền thành mảng, chỉ bo tròn đường viền ngoài, có ánh bóng nhẹ và lỗ nhỏ sau khi ủi. Hạt cách nhau hoặc chỉ chạm chéo không được nối. Đây là hình minh họa gần đúng, không mô phỏng vật lý hoặc bảo đảm màu vật liệu ngoài đời.
+- Preview cập nhật cùng mẫu: hạt kề cạnh dính liền thành mảng, đường viền ngoài bo tròn mạnh, góc lõm được nhựa chảy lấp và hai hạt chỉ chạm chéo được nối bằng eo nhỏ; có ánh bóng nhẹ và lỗ nhỏ sau khi ủi. Hạt cách nhau không được nối. Đây là hình minh họa gần đúng, không mô phỏng vật lý hoặc bảo đảm màu vật liệu ngoài đời.
 - Thiết kế tự lưu sau 300 ms; nút **Lưu** ghi ngay. Thay đổi đang chờ cũng được lưu khi đóng/reload trang hoặc chuyển ứng dụng sang nền.
 - Có thể tạo, đổi tên, mở và xóa các thiết kế trong bộ sưu tập.
 - **Xuất JSON** giữ nguồn chỉnh sửa. **Nhập JSON** tạo một thiết kế mới với ID mới, không ghi đè thiết kế đang mở.
